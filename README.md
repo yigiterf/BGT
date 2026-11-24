@@ -4,13 +4,14 @@
 
 *Bilgi Güvenliğinin Temelleri · Chapter 10 — Networks and Telecommunications · Firewall bölümü*
 
-Gerçek bir ağ kartına dokunmadan, bir güvenlik duvarının **her pakete nasıl karar verdiğini** adım adım gösteren küçük ama eksiksiz bir laboratuvar. Aynı karar motoru üç farklı "pencereden" izlenebilir:
+Gerçek bir ağ kartına dokunmadan, bir güvenlik duvarının **her pakete nasıl karar verdiğini** adım adım gösteren küçük ama eksiksiz bir laboratuvar. Aynı karar motoru dört farklı "pencereden" izlenebilir:
 
 | Pencere | Komut | Ne gösterir? |
 |---|---|---|
 | 🖥️ **Web arayüzü** | `python3 run.py` | Animasyonlu topoloji, canlı log, kural editörü, saldırı butonları |
 | ⌨️ **Terminal** | `python3 run.py demo` / `quiz` / `trace` / `lint` | Aynı motor, kod okunabilirliğinde çıktı |
 | 📦 **PCAP** | `python3 run.py pcap demo/capture.pcap` | Wireshark benzeri gerçek yakalama dosyasını kurallardan geçirir |
+| 🔗 **İki terminal** | `python3 run.py live-server` + `live-client` | Gerçek bir TCP bağlantısı üzerinden canlı client/server saldırı-savunma demosu |
 
 > **Dış bağımlılık yok.** Sadece Python standart kütüphanesi. `pip install` gerekmez, internet gerekmez.
 
@@ -24,12 +25,13 @@ Gerçek bir ağ kartına dokunmadan, bir güvenlik duvarının **her pakete nas�
 4. [Kural dili](#-kural-dili)
 5. [Web arayüzü rehberi](#-web-arayüzü-rehberi)
 6. [Komut satırı](#-komut-satırı)
-7. [Senaryolar](#-hazır-senaryolar)
-8. [Dosya yapısı ve kodu nereden okumalı?](#-dosya-yapısı)
-9. [HTTP API](#-http-api)
-10. [Testler](#-testler)
-11. [Sınırlamalar (dürüst liste)](#-sınırlamalar)
-12. [Sorun giderme](#-sorun-giderme)
+7. [İki terminal canlı demo](#-i̇ki-terminal-canlı-demo)
+8. [Senaryolar](#-hazır-senaryolar)
+9. [Dosya yapısı ve kodu nereden okumalı?](#-dosya-yapısı)
+10. [HTTP API](#-http-api)
+11. [Testler](#-testler)
+12. [Sınırlamalar (dürüst liste)](#-sınırlamalar)
+13. [Sorun giderme](#-sorun-giderme)
 
 ---
 
@@ -272,6 +274,53 @@ python3 run.py pcap demo/capture.pcap --rules benim_kurallarim.txt
 
 ---
 
+## 🔗 İki terminal canlı demo
+
+Web arayüzünden tamamen ayrı, iki terminal penceresinde (Windows'ta PowerShell/CMD, Linux/macOS'ta normal terminal) çalışan canlı bir client/server demosu. Biri **sunucu** (kuralları tutar, gelen paketleri değerlendirir), diğeri **istemci** (paket gönderir) rolünde. İletişim düz bir TCP soketi üzerinden, satır-bazlı JSON ile sağlanır — gerçek ağ paketi yakalanmaz, aynı `Firewall.evaluate()` motoru iki süreç arasında paylaşılır.
+
+**Terminal 1 — sunucu:**
+
+```bash
+python3 run.py live-server                  # boş kurallarla başlar, varsayılan politika DENY
+python3 run.py live-server --scenario web    # hazır bir senaryoyla başlamak için
+python3 run.py live-server --port 9000 --policy allow
+```
+
+Sunucu konsolunda şu komutlar kullanılabilir:
+
+| Komut                          | Ne yapar                                                |
+| ------------------------------ | ------------------------------------------------------- |
+| `list`                         | kuralları listele                                       |
+| `add <kural metni>`            | yeni kural ekle — `add allow tcp any any 10.0.0.10 443` |
+| `del <no>`                     | kuralı sil                                              |
+| `enable <no>` / `disable <no>` | kuralı aç/kapat                                         |
+| `policy allow\|deny`           | varsayılan politikayı değiştir                          |
+| `stateful on\|off`             | stateful inspection aç/kapat                            |
+| `flood <limit>` / `flood off`  | kaynak başına saniyelik paket sınırı                    |
+| `quit`                         | sunucuyu kapat                                          |
+
+**Terminal 2 — istemci:**
+
+```bash
+python3 run.py live-client                       # sunucuyla aynı makinede
+python3 run.py live-client --host 192.168.1.5     # ayrı bir makineden
+python3 run.py live-client --slow 0.1             # burst paketleri arasında 0.1 sn bekle
+```
+
+İstemci konsolunda:
+
+| Komut | Ne yapar |
+|---|---|
+| `send <kaynak_ip> <hedef_ip> <proto> <hedef_port> [bayrak]` | tek paket gönder |
+| `burst <tür>` | hazır saldırı: `portscan synflood ddos sshbrute dns ping db` |
+| `quit` | bağlantıyı kapat |
+
+**Örnek akış:** Sunucuyu boş başlat → istemciden `send 198.51.100.66 10.0.0.20 tcp 22` gönder (implicit deny ile DENY döner) → sunucuda `add allow tcp any any 10.0.0.20 22` yaz → istemciden aynı paketi tekrar gönder (artık ALLOW) → sunucuda `policy allow` yapıp `del 1` ile kuralı sil, istemciden tekrar gönder (açık firewall nedeniyle yine ALLOW, ama bu sefer farklı bir gerekçeyle). Kuralların canlı değişiminin paket kararını anında nasıl etkilediğini bu şekilde göstermiş olursun.
+
+> Şifreleme/kimlik doğrulama yok — bu bir sınıf içi demo, üretim amaçlı bir araç değil (bkz. [Sınırlamalar](#-sınırlamalar)).
+
+---
+
 ## 🧪 Hazır senaryolar
 
 | # | Ad | Politika | Gösterdiği kavram |
@@ -310,8 +359,9 @@ Sunum Ödevi/
 │   ├── traffic.py            Saldırı / trafik üreteçleri
 │   ├── pcap.py               Bağımlılıksız .pcap okuyucu/yazıcı
 │   ├── quiz.py               Terminal quiz'i
-│   ├── cli.py                Komut satırı (demo, quiz, lint, iptables, pcap, trace)
-│   └── server.py             HTTP sunucusu + JSON API
+│   ├── cli.py                Komut satırı (demo, quiz, lint, iptables, pcap, trace, live-*)
+│   ├── server.py             HTTP sunucusu + JSON API (web arayüzü)
+│   └── live.py               İki terminal canlı demo: TCP soket + NDJSON protokolü
 │
 ├── web/                      arayüz (HTML + CSS + Vanilla JS, CDN yok)
 │   ├── index.html
@@ -320,7 +370,9 @@ Sunum Ödevi/
 │
 ├── demo/capture.pcap         20 paketlik örnek yakalama
 ├── tools/make_pcap.py        capture.pcap üretici
-└── tests/test_firewall.py    43 birim testi
+└── tests/
+    ├── test_firewall.py      43 birim testi
+    └── test_live.py          live.py protokol + loopback testleri
 ```
 
 ### Kodu nereden okumalı? (sunumda 3 dosya yeter)
@@ -366,7 +418,7 @@ curl -s localhost:8080/api/packet -d '{"packet":{"src_ip":"198.51.100.66","dst_i
 python3 -m unittest discover -s tests -v
 ```
 
-43 test şunları kapsar: kural ayrıştırma ve hata durumları · CIDR/port aralığı **sınır değerleri** · protokol/bayrak eşleşmesi · ilk-eşleşen-kazanır ve sıra bağımlılığı · implicit deny · stateful (dönüş, stateless mod, engellenen paketin oturum açmaması) · flood guard (sahte saatle, kayan pencere, kaynak izolasyonu, DDoS'un geçmesi) · lint (gölgeleme, kapsama, tüm yerleşik senaryoların temizliği) · iptables çıktısı · PCAP yaz-oku turu.
+48 test şunları kapsar: kural ayrıştırma ve hata durumları · CIDR/port aralığı **sınır değerleri** · protokol/bayrak eşleşmesi · ilk-eşleşen-kazanır ve sıra bağımlılığı · implicit deny · stateful (dönüş, stateless mod, engellenen paketin oturum açmaması) · flood guard (sahte saatle, kayan pencere, kaynak izolasyonu, DDoS'un geçmesi) · lint (gölgeleme, kapsama, tüm yerleşik senaryoların temizliği) · iptables çıktısı · PCAP yaz-oku turu · `live.py` protokol kodlama/çözme ve gerçek TCP loopback üzerinden kural değişikliğinin karar sonucunu canlı değiştirdiğinin doğrulanması.
 
 ---
 

@@ -8,6 +8,8 @@
     python3 run.py pcap demo/capture.pcap --scenario web
     python3 run.py trace --src 198.51.100.66 --dst 10.0.0.20 --dport 22
     python3 run.py serve                # web arayuzu
+    python3 run.py live-server          # iki terminal demosu: sunucu
+    python3 run.py live-client          # iki terminal demosu: istemci (ayri terminalde)
 
 Amac: ayni kural motorunu kod okuyarak ve terminalde izleyerek
 gostermek. Sunumda "kod burada, karar burada" anini kolaylastirir.
@@ -395,6 +397,24 @@ def main(argv: list[str] | None = None) -> int:
     ipt.add_argument("--scenario", default=scenarios.DEFAULT_SCENARIO, choices=scenario_names)
     ipt.add_argument("--rules", default=None, help="kural dosyası (satır başına bir kural)")
 
+    live_server = sub.add_parser(
+        "live-server", help="iki terminal demosu: canlı sunucu konsolu"
+    )
+    live_server.add_argument("--host", default="0.0.0.0")
+    live_server.add_argument("--port", type=int, default=9090)
+    live_server.add_argument("--scenario", default=None, choices=scenario_names)
+    live_server.add_argument("--policy", default="deny", choices=["allow", "deny"])
+
+    live_client = sub.add_parser(
+        "live-client", help="iki terminal demosu: canlı istemci konsolu"
+    )
+    live_client.add_argument("--host", default="127.0.0.1")
+    live_client.add_argument("--port", type=int, default=9090)
+    live_client.add_argument(
+        "--slow", type=float, default=0.0,
+        help="burst'teki her paket arasında saniye bekle (canlı akış efekti)",
+    )
+
     args = parser.parse_args(raw)
 
     if args.command in (None, "serve"):
@@ -418,6 +438,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_lint(args)
     if args.command == "iptables":
         return run_iptables(args)
+    if args.command == "live-server":
+        from .live import run_live_server
+        return run_live_server(args, c=C)
+    if args.command == "live-client":
+        from .live import run_live_client
+        return run_live_client(args, c=C)
     parser.print_help()
     return 1
 

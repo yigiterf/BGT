@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniFirewall Lab — Paket Filtreleme Simülatörü</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2322d3ee' d='M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= ÜST BAR ================= -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z"
+                fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M8.4 12.1l2.4 2.4 4.8-4.8" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>MiniFirewall <span>Lab</span></h1>
+        <p>IP · Port · Protokol tabanlı paket filtreleme simülasyonu</p>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <label class="field compact">
+        <span>Senaryo</span>
+        <select id="scenarioSelect" title="Hazır kural setleri"></select>
+      </label>
+
+      <div class="field compact">
+        <span>Varsayılan politika</span>
+        <div class="seg" id="policySeg">
+          <button type="button" data-policy="allow">ALLOW</button>
+          <button type="button" data-policy="deny">DENY</button>
+        </div>
+      </div>
+
+      <label class="switch" title="Stateful inspection: izin verilen oturumların yanıtlarını hatırla">
+        <input type="checkbox" id="statefulToggle">
+        <span class="switch-track"><span class="switch-dot"></span></span>
+        <span class="switch-label">Stateful</span>
+      </label>
+
+      <label class="switch" title="Flood guard: bir kaynak IP'si saniyede en fazla N paket gönderebilir">
+        <input type="checkbox" id="floodToggle">
+        <span class="switch-track"><span class="switch-dot"></span></span>
+        <span class="switch-label" id="floodLabel">Flood guard</span>
+      </label>
+
+      <label class="switch" title="Arka planda sürekli gerçekçi trafik üret (ekran canlı kalsın)">
+        <input type="checkbox" id="autoToggle">
+        <span class="switch-track"><span class="switch-dot"></span></span>
+        <span class="switch-label">Canlı trafik</span>
+      </label>
+
+      <button class="btn ghost" id="resetBtn" title="Sayaçları ve logu sıfırla">Sıfırla</button>
+      <button class="btn ghost accent" id="iptablesBtn" title="Bu kurallar gerçek Linux'ta iptables ile nasıl yazılırdı?">
+        <span class="mono">$</span> iptables
+      </button>
+      <button class="btn ghost accent" id="codeBtn" title="Karar motorunun kaynak kodu">
+        <span class="mono">&lt;/&gt;</span> Kaynak kod
+      </button>
+      <button class="btn ghost accent" id="presentBtn" title="Projeksiyon / gün ışığı için büyük yazı tipi, yüksek kontrast ve sade görünüm" aria-pressed="false">
+        ☀️ Sunum modu
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= ÇALIŞMA ALANI ================= -->
+  <main class="workspace">
+
+    <!-- ---------- SOL: PAKET ÜRETECİ ---------- -->
+    <aside class="panel forge">
+      <div class="panel-head">
+        <h2><span class="dot cyan"></span>Paket üreteci</h2>
+        <span class="hint mono">5-tuple</span>
+      </div>
+
+      <div class="quick-services" id="serviceChips">
+        <button type="button" class="chip" data-dst="10.0.0.10" data-port="443" data-proto="tcp">Web <b>:443</b></button>
+        <button type="button" class="chip" data-dst="10.0.0.53" data-port="53" data-proto="udp">DNS <b>:53</b></button>
+        <button type="button" class="chip" data-dst="10.0.0.20" data-port="22" data-proto="tcp">SSH <b>:22</b></button>
+        <button type="button" class="chip" data-dst="10.0.0.30" data-port="3306" data-proto="tcp">DB <b>:3306</b></button>
+      </div>
+
+      <form id="packetForm" class="forge-form" autocomplete="off">
+        <div class="row">
+          <label class="field">
+            <span>Kaynak IP</span>
+            <input id="srcIp" value="198.51.100.66" spellcheck="false">
+          </label>
+          <label class="field narrow">
+            <span>Kaynak port</span>
+            <input id="srcPort" value="51234" inputmode="numeric" spellcheck="false">
+          </label>
+        </div>
+        <div class="row">
+          <label class="field">
+            <span>Hedef IP</span>
+            <input id="dstIp" value="10.0.0.10" spellcheck="false">
+          </label>
+          <label class="field narrow">
+            <span>Hedef port</span>
+            <input id="dstPort" value="443" inputmode="numeric" spellcheck="false">
+          </label>
+        </div>
+        <div class="row">
+          <label class="field">
+            <span>Protokol</span>
+            <select id="proto">
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+              <option value="icmp">ICMP</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>TCP bayrakları</span>
+            <input id="flags" value="SYN" spellcheck="false" placeholder="SYN, ACK...">
+          </label>
+        </div>
+      </form>
+
+      <button class="btn primary send" id="sendBtn" type="submit" form="packetForm">
+        Paketi gönder <span aria-hidden="true">▶</span>
+      </button>
+
+      <div class="panel-head sub">
+        <h2><span class="dot red"></span>Saldırı senaryoları</h2>
+        <span class="hint">tek tık</span>
+      </div>
+      <div class="attack-grid" id="attackGrid"></div>
+
+      <div class="syntax-help">
+        <div class="sh-title">Kural sözdizimi</div>
+        <code>allow tcp any any 10.0.0.10 443</code>
+        <div class="sh-cols">
+          <span>ACTION</span><span>PROTO</span><span>KAYNAK</span>
+          <span>SPORT</span><span>HEDEF</span><span>DPORT</span>
+        </div>
+        <p>IP: <b>any</b> · <b>CIDR</b> · liste &nbsp;|&nbsp; Port: <b>any</b> · <b>443</b> · <b>80,443</b> · <b>1024-65535</b></p>
+      </div>
+
+    </aside>
+
+    <!-- ---------- ORTA: TOPOLOJİ + İSTATİSTİK ---------- -->
+    <section class="center">
+      <div class="panel stage" id="stage">
+        <canvas id="canvas"></canvas>
+        <div class="stage-top">
+          <div class="live"><span class="live-dot"></span>CANLI</div>
+          <div class="stage-scenario" id="stageScenario">—</div>
+        </div>
+        <div class="stage-real" id="realGrid" title="Tarayıcıdan gerçek HTTP isteği — kararı aynı motor verir"></div>
+        <div class="stage-legend">
+          <span><i class="lg allow"></i>izin</span>
+          <span><i class="lg deny"></i>engel</span>
+          <span><i class="lg tcp"></i>TCP</span>
+          <span><i class="lg udp"></i>UDP</span>
+          <span><i class="lg icmp"></i>ICMP</span>
+        </div>
+      </div>
+
+      <div class="stats-strip">
+        <div class="stat">
+          <span class="stat-label">Toplam</span>
+          <b id="statTotal">0</b>
+        </div>
+        <div class="stat ok">
+          <span class="stat-label">Geçen</span>
+          <b id="statAllowed">0</b>
+        </div>
+        <div class="stat bad">
+          <span class="stat-label">Engellenen</span>
+          <b id="statDenied">0</b>
+        </div>
+        <div class="stat rate">
+          <span class="stat-label">Engel oranı</span>
+          <b id="statRate">%0</b>
+        </div>
+        <div class="stat flood" title="Flood guard tarafından kesilen paket sayısı">
+          <span class="stat-label">Flood engeli</span>
+          <b id="statFlood">0</b>
+        </div>
+        <div class="history">
+          <div class="history-bars" id="historyBars"></div>
+          <span class="history-label">son 90 karar</span>
+        </div>
+      </div>
+
+      <div class="verdict" id="verdictCard">
+        <div class="verdict-left">
+          <span class="v-badge idle" id="verdictBadge">—</span>
+          <div class="verdict-main">
+            <div class="v-text" id="verdictText">Henüz karar yok</div>
+            <div class="v-reason" id="verdictReason">Bir paket gönder veya saldırı başlat.</div>
+          </div>
+        </div>
+        <button class="btn ghost small" id="replyBtn" hidden title="Aynı akışın dönüş paketini gönder">Yanıtı gönder ↺</button>
+        <button class="btn ghost small" id="traceBtn" disabled>Kural izi</button>
+      </div>
+    </section>
+
+    <!-- ---------- SAĞ: KURALLAR ---------- -->
+    <aside class="panel rules">
+      <div class="panel-head">
+        <h2><span class="dot green"></span>Kurallar <span class="count" id="ruleCount">0</span></h2>
+        <button class="btn primary small" id="addRuleBtn">+ Kural</button>
+      </div>
+      <div class="rules-meta">
+        <span>İlk eşleşen kural kazanır</span>
+        <span class="mono" id="policyLabel">DENY</span>
+      </div>
+      <div class="rule-list" id="ruleList"></div>
+      <div class="rules-foot">
+        <span class="mono">eşleşme yok → varsayılan politika</span>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ================= LOG ================= -->
+  <footer class="panel logpanel">
+    <div class="panel-head">
+      <h2><span class="dot purple"></span>Canlı karar akışı <span class="count" id="logCount">0</span></h2>
+      <div class="log-tools">
+        <div class="seg tiny" id="logFilters">
+          <button type="button" class="active" data-filter="all">Tümü</button>
+          <button type="button" data-filter="allow">Geçen</button>
+          <button type="button" data-filter="deny">Engel</button>
+        </div>
+        <label class="check"><input type="checkbox" id="autoScroll" checked> otomatik kaydır</label>
+        <button class="btn ghost small" id="clearLog">Temizle</button>
+      </div>
+    </div>
+    <div class="log-body" id="logBody">
+      <div class="log-list" id="logList"></div>
+      <div class="log-empty" id="logEmpty">Henüz trafik yok — soldan bir paket gönder.</div>
+    </div>
+  </footer>
+</div>
+
+<!-- ================= KURAL MODALI ================= -->
+<div class="modal" id="ruleModal" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="modalTitle">Yeni kural</h3>
+      <button class="icon-btn" id="closeRuleModal" aria-label="Kapat">✕</button>
+    </div>
+    <form id="ruleForm" autocomplete="off">
+      <div class="form-grid">
+        <label class="field">
+          <span>Aksiyon</span>
+          <select id="rAction"><option value="allow">ALLOW</option><option value="deny">DENY</option></select>
+        </label>
+        <label class="field">
+          <span>Protokol</span>
+          <select id="rProto">
+            <option value="any">any</option><option value="tcp">tcp</option>
+            <option value="udp">udp</option><option value="icmp">icmp</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Kaynak IP / CIDR</span>
+          <input id="rSrc" value="any" spellcheck="false" placeholder="any | 10.0.0.0/24">
+        </label>
+        <label class="field">
+          <span>Kaynak port</span>
+          <input id="rSport" value="any" spellcheck="false" placeholder="any | 1024-65535">
+        </label>
+        <label class="field">
+          <span>Hedef IP / CIDR</span>
+          <input id="rDst" value="any" spellcheck="false" placeholder="any | 10.0.0.10">
+        </label>
+        <label class="field">
+          <span>Hedef port</span>
+          <input id="rDport" value="any" spellcheck="false" placeholder="any | 80,443">
+        </label>
+        <label class="field">
+          <span>TCP bayrağı (opsiyonel)</span>
+          <input id="rFlags" value="" spellcheck="false" placeholder="SYN">
+        </label>
+        <label class="field">
+          <span>Açıklama</span>
+          <input id="rComment" value="" spellcheck="false" placeholder="Web sunucusu">
+        </label>
+      </div>
+      <div class="preview">
+        <span class="preview-label">Kural satırı</span>
+        <code id="rulePreview"></code>
+      </div>
+      <p class="form-error" id="ruleError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn danger ghost" id="deleteRuleBtn" hidden>Sil</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="cancelRule">Vazgeç</button>
+        <button type="submit" class="btn primary" id="saveRule">Kaydet</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= İZ MODALI ================= -->
+<div class="modal" id="traceModal" aria-hidden="true">
+  <div class="modal-card wide">
+    <div class="modal-head">
+      <h3>Karar izi — kural kural</h3>
+      <button class="icon-btn" id="closeTraceModal" aria-label="Kapat">✕</button>
+    </div>
+    <div class="trace-packet" id="tracePacket"></div>
+    <div class="trace-list" id="traceList"></div>
+    <div class="trace-final" id="traceFinal"></div>
+  </div>
+</div>
+
+<!-- ================= KOD ÇEKMECESİ ================= -->
+<div class="drawer" id="codeDrawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <h3>Kaynak kod</h3>
+      <p class="tiny">Arayüzdeki her karar bu dosyalardaki kodla veriliyor.</p>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn ghost small" id="copyCode">Kopyala</button>
+      <button class="icon-btn" id="closeCode" aria-label="Kapat">✕</button>
+    </div>
+  </div>
+  <div class="code-tabs" id="codeTabs"></div>
+  <div class="code-body">
+    <pre class="code" id="codeBody"><code>Yükleniyor…</code></pre>
+  </div>
+</div>
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
